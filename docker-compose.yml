@@ -3,7 +3,7 @@ services:
     build:
       context: ./docker
       dockerfile: Dockerfile
-    container_name: laravel_app
+    container_name: url_shortener_app
     working_dir: /var/www/html
     volumes:
       - ./src:/var/www/html
@@ -11,8 +11,8 @@ services:
       - "8000:8000"
     environment:
       - DB_HOST=db
-      - DB_DATABASE=todo
-      - DB_USERNAME=todo
+      - DB_DATABASE=url_shortener
+      - DB_USERNAME=url_shortener
       - DB_PASSWORD=secret
     depends_on:
       - db

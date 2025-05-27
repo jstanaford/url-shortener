@@ -27,8 +27,22 @@ case "$1" in
     ensure_db_file
     docker compose up -d
     ;;
+  migrate)
+    docker exec url_shortener_app php artisan migrate
+    ;;
+  clear-cache)
+    echo "Clearing Laravel cache..."
+    docker exec url_shortener_app php artisan cache:clear
+    docker exec url_shortener_app php artisan config:clear
+    docker exec url_shortener_app php artisan route:clear
+    docker exec url_shortener_app php artisan view:clear
+    echo "Cache cleared successfully!"
+    ;;
+  test)
+    ./test.sh
+    ;;
   *)
-    echo "Usage: $0 {start|stop|restart}"
+    echo "Usage: $0 {start|stop|restart|migrate|clear-cache|test}"
     exit 1
     ;;
 esac 
