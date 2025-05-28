@@ -18,6 +18,8 @@ class VerifyCsrfToken extends Middleware
         '/shorten',
         'analytics/*',
         '/analytics/*',
+        'analytics',
+        '/analytics',
         's/*',
         '/s/*',
     ];

@@ -45,6 +45,10 @@
                     </p>
                 </div>
             </div>
+            
+            <div class="mt-8 pt-6 border-t border-gray-200 text-center">
+                <a href="/dashboard" class="text-blue-600 hover:underline">View Analytics Dashboard</a>
+            </div>
         </div>
     </div>
 

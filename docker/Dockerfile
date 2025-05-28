@@ -7,6 +7,9 @@ RUN apt-get update && apt-get install -y \
     unzip \
     && docker-php-ext-install pdo pdo_mysql zip
 
+# Install Redis extension
+RUN pecl install redis && docker-php-ext-enable redis
+
 # Install Composer (using Composer's installer)
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
