@@ -16,16 +16,57 @@ function Ensure-DB-File {
     }
 }
 
+function Ensure-Dependencies {
+    if (-not (Test-Path "src\vendor")) {
+        Write-Host "Installing Laravel dependencies..."
+        Push-Location src
+        composer install
+        Pop-Location
+    }
+}
+
+function Ensure-App-Key {
+    Write-Host "Checking for Laravel application key..."
+    $hasKey = docker exec url_shortener_app sh -c "grep -q 'APP_KEY=' .env"
+    $emptyKey = docker exec url_shortener_app sh -c "grep -q 'APP_KEY=$' .env"
+    
+    if (-not $hasKey -or $emptyKey) {
+        Write-Host "Generating Laravel application key..."
+        docker exec url_shortener_app php artisan key:generate --force
+    } else {
+        Write-Host "Laravel application key exists."
+    }
+}
+
+function Restart-Queue {
+    Write-Host "Starting queue workers..."
+    # Check if container is running before restarting queue
+    $queueRunning = docker ps --filter "name=url_shortener_queue" --filter "status=running" --format "{{.Names}}"
+    if ($queueRunning -match "url_shortener_queue") {
+        docker exec url_shortener_queue php artisan queue:restart
+    } else {
+        Write-Host "Queue container is not running yet. Waiting..."
+        Start-Sleep -Seconds 5
+        $queueRunning = docker ps --filter "name=url_shortener_queue" --filter "status=running" --format "{{.Names}}"
+        if ($queueRunning -match "url_shortener_queue") {
+            docker exec url_shortener_queue php artisan queue:restart
+        } else {
+            Write-Host "Warning: Queue container not running. Please check docker logs for details."
+        }
+    }
+}
+
 switch ($Command) {
     "start" {
         Ensure-DB-File
+        Ensure-Dependencies
         docker compose up -d
         Write-Host "Waiting for services to start..."
         Start-Sleep -Seconds 5
         # Run migrations after containers are up
-        docker exec url_shortener_app php artisan migrate
-        Write-Host "Starting queue workers..."
-        docker exec url_shortener_queue php artisan queue:restart
+        Ensure-App-Key
+        docker exec url_shortener_app php artisan migrate --force
+        Restart-Queue
         Write-Host "System is ready!"
     }
     "stop" {
@@ -34,13 +75,14 @@ switch ($Command) {
     "restart" {
         docker compose down
         Ensure-DB-File
+        Ensure-Dependencies
         docker compose up -d
         Write-Host "Waiting for services to start..."
         Start-Sleep -Seconds 5
         # Reset database and run migrations
-        docker exec url_shortener_app php artisan migrate:fresh
-        Write-Host "Restarting queue workers..."
-        docker exec url_shortener_queue php artisan queue:restart
+        Ensure-App-Key
+        docker exec url_shortener_app php artisan migrate:fresh --force
+        Restart-Queue
         Write-Host "System is ready!"
     }
     "migrate" {
@@ -54,8 +96,7 @@ switch ($Command) {
         docker exec url_shortener_app php artisan view:clear
         # Also clear Redis cache
         docker exec url_shortener_redis redis-cli FLUSHALL
-        Write-Host "Restarting queue workers..."
-        docker exec url_shortener_queue php artisan queue:restart
+        Restart-Queue
         Write-Host "Cache cleared successfully!"
     }
     "queue-status" {
@@ -86,6 +127,9 @@ switch ($Command) {
         docker exec url_shortener_app sh -c "sed -i 's/QUEUE_CONNECTION=database/QUEUE_CONNECTION=redis/g' .env"
         docker exec url_shortener_app sh -c "sed -i 's/CACHE_STORE=database/CACHE_STORE=redis/g' .env"
         
+        Write-Host "`nChecking application key..."
+        Ensure-App-Key
+        
         Write-Host "`nRestarting services..."
         docker restart url_shortener_app
 
@@ -105,12 +149,7 @@ switch ($Command) {
         docker exec url_shortener_app php artisan cache:clear
         
         Write-Host "`nRestarting queue workers..."
-        $queueExists = docker ps | Select-String url_shortener_queue
-        if ($queueExists) {
-            docker exec url_shortener_queue php artisan queue:restart
-        } else {
-            Write-Host "Warning: Queue worker not found, please restart with .\manage.ps1 restart"
-        }
+        Restart-Queue
         
         Write-Host "`nTroubleshooting complete! Try your tests again."
     }
@@ -119,10 +158,7 @@ switch ($Command) {
         Write-Host "Preparing test environment..."
         docker exec url_shortener_app php artisan cache:clear
         docker exec url_shortener_redis redis-cli FLUSHALL
-        $queueExists = docker ps | Select-String url_shortener_queue
-        if ($queueExists) {
-            docker exec url_shortener_queue php artisan queue:restart
-        }
+        Restart-Queue
         Start-Sleep -Seconds 2
         & .\test.ps1
     }

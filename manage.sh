@@ -14,16 +14,51 @@ function ensure_db_file() {
   fi
 }
 
+function ensure_dependencies() {
+  if [ ! -d "src/vendor/laravel" ]; then
+    echo "Installing Laravel dependencies..."
+    cd src && composer install
+    cd ..
+  fi
+}
+
+function ensure_app_key() {
+  echo "Checking for Laravel application key..."
+  if ! docker exec url_shortener_app grep -q "APP_KEY=" .env || docker exec url_shortener_app grep -q "APP_KEY=$" .env; then
+    echo "Generating Laravel application key..."
+    docker exec url_shortener_app php artisan key:generate --force
+  else
+    echo "Laravel application key exists."
+  fi
+}
+
+function restart_queue() {
+  echo "Starting queue workers..."
+  # Check if container is running before restarting queue
+  if docker ps --filter "name=url_shortener_queue" --filter "status=running" --format "{{.Names}}" | grep -q url_shortener_queue; then
+    docker exec url_shortener_queue php artisan queue:restart
+  else
+    echo "Queue container is not running yet. Waiting..."
+    sleep 5
+    if docker ps --filter "name=url_shortener_queue" --filter "status=running" --format "{{.Names}}" | grep -q url_shortener_queue; then
+      docker exec url_shortener_queue php artisan queue:restart
+    else
+      echo "Warning: Queue container not running. Please check docker logs for details."
+    fi
+  fi
+}
+
 case "$1" in
   start)
     ensure_db_file
+    ensure_dependencies
     docker compose up -d
     echo "Waiting for services to start..."
     sleep 5
     # Run migrations after containers are up
-    docker exec url_shortener_app php artisan migrate
-    echo "Starting queue workers..."
-    docker exec url_shortener_queue php artisan queue:restart
+    ensure_app_key
+    docker exec url_shortener_app php artisan migrate --force
+    restart_queue
     echo "System is ready!"
     ;;
   stop)
@@ -32,13 +67,14 @@ case "$1" in
   restart)
     docker compose down
     ensure_db_file
+    ensure_dependencies
     docker compose up -d
     echo "Waiting for services to start..."
     sleep 5
     # Reset database and run migrations
-    docker exec url_shortener_app php artisan migrate:fresh
-    echo "Restarting queue workers..."
-    docker exec url_shortener_queue php artisan queue:restart
+    ensure_app_key
+    docker exec url_shortener_app php artisan migrate:fresh --force
+    restart_queue
     echo "System is ready!"
     ;;
   migrate)
@@ -52,8 +88,7 @@ case "$1" in
     docker exec url_shortener_app php artisan view:clear
     # Also clear Redis cache
     docker exec url_shortener_redis redis-cli FLUSHALL
-    echo "Restarting queue workers..."
-    docker exec url_shortener_queue php artisan queue:restart
+    restart_queue
     echo "Cache cleared successfully!"
     ;;
   queue-status)
@@ -84,6 +119,9 @@ case "$1" in
     docker exec url_shortener_app bash -c "sed -i 's/QUEUE_CONNECTION=database/QUEUE_CONNECTION=redis/g' .env"
     docker exec url_shortener_app bash -c "sed -i 's/CACHE_STORE=database/CACHE_STORE=redis/g' .env"
     
+    echo -e "\nChecking application key..."
+    ensure_app_key
+    
     echo -e "\nRestarting services..."
     docker restart url_shortener_app
 
@@ -102,11 +140,7 @@ case "$1" in
     docker exec url_shortener_app php artisan cache:clear
     
     echo -e "\nRestarting queue workers..."
-    if docker ps | grep -q url_shortener_queue; then
-        docker exec url_shortener_queue php artisan queue:restart
-    else
-        echo "Warning: Queue worker not found, please restart with ./manage.sh restart"
-    fi
+    restart_queue
     
     echo -e "\nTroubleshooting complete! Try your tests again."
     ;;
@@ -115,9 +149,7 @@ case "$1" in
     echo "Preparing test environment..."
     docker exec url_shortener_app php artisan cache:clear
     docker exec url_shortener_redis redis-cli FLUSHALL
-    if docker ps | grep -q url_shortener_queue; then
-        docker exec url_shortener_queue php artisan queue:restart
-    fi
+    restart_queue
     sleep 2
     ./test.sh
     ;;

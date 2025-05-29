@@ -6,7 +6,6 @@
 /storage/*.key
 /storage/pail
 /vendor
-.env
 
 Homestead.json
 Homestead.yaml
